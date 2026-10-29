@@ -171,7 +171,7 @@ function drawParams(){const b=$('params');b.innerHTML='';cur.params.forEach(([k,
  if(o){i=document.createElement('select');o.forEach(v=>i.add(new Option(v,v)));i.value=P[cur.id][k]}
  else{i=document.createElement('input');if(bo){i.type='checkbox';i.checked=P[cur.id][k]}else{i.type='number';i.step='any';i.value=P[cur.id][k]}}
  i.onchange=()=>{const v=o?i.value:bo?i.checked:parseFloat(i.value);if(o||bo||v>=0){P[cur.id][k]=v;save();render(true)}};l.append(n,i);b.append(l)})}
-function refresh(){ALL=[LIQ,BIO,SMC,...CUST];const w=cur.id||savedId;cur=ALL.find(x=>x.id==w)||LIQ;
+function refresh(){ALL=[LIQ,BIO,SMC,ICT,...CUST];const w=cur.id||savedId;cur=ALL.find(x=>x.id==w)||LIQ;
  $('ind').innerHTML='';ALL.forEach(x=>{ensureP(x);$('ind').add(new Option(x.name,x.id))});$('ind').value=cur.id;
  if(chart){drawParams();render(true)}}
 function compile(r){try{const fn=new Function('d','p','H',r.code);return{id:'c_'+r.docId,name:r.name,params:JSON.parse(r.params||'[]'),docId:r.docId,calc:(d,p,h)=>fn(d,p,h)}}catch(e){return null}}
@@ -388,6 +388,33 @@ function smc(d,p){
  }
  return{lines:[],sigs:S,marks:M}}
 const SMC={id:'smc',name:'SMC: BOS + CHoCH + OB',calc:smc,params:[['mode','Signal mode','Balanced',['Strict','Balanced','More signals']],['sw','Swing length',3],['bosAge','Max bars since last BOS',80],['maxLeg','Max bars: low to CHoCH',40],['age','Max bars: CHoCH to entry',60],['fib','Entry level inside OB (0 top, 1 bottom)',.25],['minGap','Min imbalance size x ATR',.1],['maxOB','Max OB size x ATR',3],['buf','SL buffer x ATR',.1],['maxRisk','Max risk x ATR',5],['tp1Pct','TP1 position (fraction of entry to TARGET)',.5],['useSell','Enable SELL',true],['useBuy','Enable BUY',true]]};
+function ict(d,p,H){const n=d.length,A=H.atr(d,14),S=[],sw=Math.max(2,p.sw|0);
+let day=-1,aH=NaN,aL=NaN,ai=0,st=0,dr=0,ext=0,sb=0,ch=NaN,ci=0,fT=NaN,fB=NaN,fb=0,ab=0,used=0,lSH=NaN,lSL=NaN,act=0,cur=null;
+for(let i=0;i<n;i++){const x=d[i],dy=Math.floor(x.time/86400),h=(x.time%86400)/3600,inA=h>=p.aS&&h<p.aE,inL=h>=p.lS&&h<p.lE;
+ if(dy!=day){day=dy;aH=NaN;aL=NaN;used=0;if(!act)st=0}
+ if(inA){if(isNaN(aH)){aH=x.high;aL=x.low;ai=i}else{aH=Math.max(aH,x.high);aL=Math.min(aL,x.low)}}
+ const ph=pivH(d,i,sw),pv=pivL(d,i,sw);if(!isNaN(ph))lSH=ph;if(!isNaN(pv))lSL=pv;
+ if(st==1&&i-sw<=sb){if(dr<0&&!isNaN(pv))ch=pv;if(dr>0&&!isNaN(ph))ch=ph}
+ if(act){if(H.step(cur,x,i))act=0;continue}
+ const rng=aH-aL,a=A[i];
+ if(st==0){if(inL&&!inA&&rng>0&&!(p.one&&used)){const s1=p.useSell&&x.high>aH+p.minSw*a&&!isNaN(lSL),b1=p.useBuy&&x.low<aL-p.minSw*a&&!isNaN(lSH);if(s1!=b1){st=1;dr=s1?-1:1;ext=s1?x.high:x.low;sb=i;ch=s1?lSL:lSH;fT=NaN;fB=NaN}}}
+ else{if(st<3)ext=dr<0?Math.max(ext,x.high):Math.min(ext,x.low);
+  if((dr<0?ext-aH:aL-ext)>p.maxDepth*rng||(st<3&&i-sb>p.wait)||(st==3&&i-ab>p.wait)){st=0}
+  else{
+   if(st<3&&i-2>=sb){if(dr<0&&x.high<d[i-2].low){fT=d[i-2].low;fB=x.high;fb=i}else if(dr>0&&x.low>d[i-2].high){fT=x.low;fB=d[i-2].high;fb=i}}
+   if(st==1&&(dr<0?x.close<ch:x.close>ch)){st=2;ci=i}
+   if(st==2&&!isNaN(fT)){st=3;ab=i}
+   else if(st==3&&i>ab){const e=dr<0?fB+p.fe*(fT-fB):fT-p.fe*(fT-fB),sl=dr<0?ext+p.buf*a:ext-p.buf*a,r=Math.abs(e-sl);
+    if(dr<0?x.high>=e:x.low<=e){const t2=p.tpm=='Asia opposite side'?(dr<0?aL:aH):e+dr*p.rr*r;
+     if(r>0&&dr*(t2-e)>=p.minRR*r){const t1=e+(t2-e)*p.tp1Pct;
+      cur=H.mk(d,i,dr<0?'SELL':'BUY',e,sl,Math.abs(t1-e)/r,Math.abs(t2-e)/r);cur.st='OPEN';cur.txt=(dr<0?'SELL':'BUY')+' | Asia sweep + CHoCH + FVG';
+      cur.dr=[{t:'B',i1:ai,i2:ci,y1:aH,y2:aL,c:'rgba(148,163,184,.22)',x:'Asia'},{t:'T',i:sb,y:ext,x:'Sweep',c:'mt',dx:0},{t:'L',i1:sb,i2:ci,y1:ch,y2:ch,c:'mt'},{t:'T',i:ci,y:ch,x:'CHoCH',c:'mt',dx:0},{t:'B',i1:fb-2,e:1,y1:fT,y2:fB,c:'rgba(59,130,246,.22)',x:'FVG'},{t:'L',i1:i,e:1,y1:t2,y2:t2,c:'fg'},{t:'T',i:i,e:1,y:t2,x:'TARGET',c:'fg',dx:4}];
+      act=1;S.push(cur);used=1}
+     st=0}}
+  }}
+}
+return{lines:[],sigs:S,marks:[]}}
+const ICT={id:'ict',name:'ICT: Asia Sweep + CHoCH + FVG',calc:ict,params:[['aS','Asia start hour (UTC)',0],['aE','Asia end hour (UTC)',7],['lS','London start hour (UTC)',7],['lE','London end hour (UTC)',10],['sw','Swing length',2],['minSw','Min sweep x ATR',.1],['maxDepth','Max sweep depth x Asia range',.5],['wait','Max bars to wait per step',40],['fe','Entry inside FVG (0 near edge, 1 far)',.5],['buf','SL buffer x ATR',.1],['tpm','Take profit mode','RR Multiple',['RR Multiple','Asia opposite side']],['rr','Risk:Reward to TP2',2],['tp1Pct','TP1 position (fraction of entry to TP2)',.5],['minRR','Min reward:risk',1],['one','One trade per day',true],['useSell','Enable SELL',true],['useBuy','Enable BUY',true]]};
 let ws=null,poll=null,FC=null,liveTok=0;
 const BI=['1m','5m','15m','30m','1h','4h'],TI=['1min','5min','15min','30min','1h','4h'];
 function stopLive(){liveTok++;if(ws){try{ws.onclose=null;ws.close()}catch(e){}ws=null}clearInterval(poll);poll=null;FC=null}
